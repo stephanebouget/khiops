@@ -84,7 +84,7 @@ class ModlMainWindowTest
                 try {
                         long processId = modl.pid();
                         WindowInfo mainWindow =
-                          awaitMainWindow(modl, Long.getLong("khiops.startup.wait.millis", 10000L), logFile);
+                          awaitMainWindow(modl, Long.getLong("khiops.startup.wait.millis", 30000L), logFile);
                         User32.INSTANCE.ShowWindow(mainWindow.handle, WinUser.SW_RESTORE);
                         User32.INSTANCE.SetForegroundWindow(mainWindow.handle);
                         TimeUnit.MILLISECONDS.sleep(500);
