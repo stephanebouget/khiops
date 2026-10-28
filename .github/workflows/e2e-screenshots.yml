@@ -1,0 +1,52 @@
+---
+name: E2E screenshots
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  e2e-compile:
+    name: Compile E2E tests
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v7
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '11'
+      - name: Compile E2E tests
+        working-directory: test/E2E
+        run: mvn --batch-mode test-compile
+  e2e-screenshots:
+    name: Run Windows GUI E2E and capture screenshots
+    needs: e2e-compile
+    runs-on: windows-2025-vs2026
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v7
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '11'
+      - name: Build Khiops GUI targets
+        uses: ./.github/actions/build-khiops
+        with:
+          preset-name: windows-msvc-release
+          override-flags: -DBUILD_JARS=ON -DTESTING=OFF -DMPI=OFF
+          targets: MODL norm_jar khiops_jar
+      - name: Run E2E tests
+        working-directory: test/E2E
+        run: mvn --batch-mode test
+      - name: Upload screenshots and logs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: khiops-e2e-screenshots-${{ github.run_number }}
+          path: |
+            test/E2E/target/screenshots/
+            test/E2E/target/modl-e2e.log
+          if-no-files-found: warn
+          retention-days: 14

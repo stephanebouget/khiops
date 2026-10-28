@@ -42,3 +42,6 @@ __pycache__/
 
 # Packaging files copied from packaging/pip/
 pyproject.toml
+
+# e2e docs tests
+test/E2E/target/
