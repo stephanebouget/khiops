@@ -21,41 +21,50 @@ import com.sun.jna.win32.W32APIOptions;
 import java.awt.Rectangle;
 import java.awt.Robot;
 import java.awt.Toolkit;
+import java.awt.datatransfer.Clipboard;
 import java.awt.datatransfer.StringSelection;
+import java.awt.datatransfer.Transferable;
 import java.awt.event.KeyEvent;
 import java.awt.image.BufferedImage;
+import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import javax.imageio.ImageIO;
 import org.assertj.swing.image.ScreenshotTaker;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 
 class ModlMainWindowTest
 {
-        // Mnemonic (underlined letter) of the "Data Dictionary" menu in the menu bar
-        private static final int DATA_DICTIONARY_MENU_MNEMONIC = KeyEvent.VK_D;
+        // Default scenario, loaded from the test classpath (override with -Dkhiops.scenario=<file>)
+        private static final String SCENARIO_RESOURCE = "/modl-scenario.txt";
+
+        // Matches ${variableName} placeholders inside scenario arguments
+        private static final Pattern VARIABLE_PATTERN = Pattern.compile("\\$\\{([A-Za-z0-9_]+)}");
 
         @Test void launchesModlAndCapturesMainScreen() throws Exception
         {
+                Assumptions.assumeTrue(System.getProperty("os.name").toLowerCase().contains("win"),
+                                       "MODL UI test relies on the Win32 API");
+
                 Path executable = Paths.get(System.getProperty("khiops.executable")).toAbsolutePath().normalize();
                 Path jarDirectory = Paths.get(System.getProperty("khiops.jar.dir")).toAbsolutePath().normalize();
                 Path outputDirectory = Paths.get("target", "screenshots").toAbsolutePath().normalize();
-                Path trainDatabaseScreenshot = outputDirectory.resolve("Khiops_TrainDatabase.png");
-                Path samplingScreenshot = outputDirectory.resolve("Khiops_TrainDatabase_Sampling.png");
-                Path selectionScreenshot = outputDirectory.resolve("Khiops_TrainDatabase_Selection.png");
-                Path parametersScreenshot = outputDirectory.resolve("Khiops_Parameters.png");
-                Path advancedParametersScreenshot = outputDirectory.resolve("Khiops_Parameters_Advanced.png");
-                Path recodersScreenshot = outputDirectory.resolve("Khiops_Parameters_Recorders.png");
-                Path preprocessingScreenshot = outputDirectory.resolve("Khiops_Parameters_Preprocessing.png");
-                Path systemParametersScreenshot = outputDirectory.resolve("Khiops_Parameters_SystemParameters.png");
                 Path logFile = Paths.get("target", "modl-e2e.log").toAbsolutePath().normalize();
                 Path irisDataDirectory =
                   Paths.get("..", "LearningTest", "datasets", "Iris").toAbsolutePath().normalize();
@@ -68,6 +77,9 @@ class ModlMainWindowTest
                 assertThat(dictionaryFile).as("Iris dictionary").isRegularFile();
                 assertThat(databaseFile).as("Iris database").isRegularFile();
 
+                // Read the scenario first so that a missing or unreadable file fails before MODL is started
+                List<String> scenario = readScenario();
+
                 Files.createDirectories(outputDirectory);
                 Files.createDirectories(logFile.getParent());
 
@@ -79,6 +91,10 @@ class ModlMainWindowTest
                 Map<String, String> environment = processBuilder.environment();
                 environment.put("CLASSPATH", buildClasspath(jarDirectory));
                 prependRuntimePaths(environment, executable.getParent());
+
+                // The scenario overwrites the system clipboard, so keep its content to restore it afterwards
+                Clipboard clipboard = Toolkit.getDefaultToolkit().getSystemClipboard();
+                Transferable savedClipboard = readClipboard(clipboard);
 
                 Process modl = processBuilder.start();
                 try {
@@ -93,63 +109,237 @@ class ModlMainWindowTest
                         robot.setAutoDelay(100);
                         robot.setAutoWaitForIdle(true);
 
-                        // Open the "Data Dictionary" menu with its mnemonic instead of a pixel click
-                        pressChord(robot, KeyEvent.VK_ALT, DATA_DICTIONARY_MENU_MNEMONIC);
+                        ScenarioContext context = new ScenarioContext(robot, processId, mainWindow, outputDirectory,
+                                                                      logFile);
+                        context.variables.put("dictionaryFile", dictionaryFile.toString());
+                        context.variables.put("databaseFile", databaseFile.toString());
 
-                        TimeUnit.MILLISECONDS.sleep(500);
-                        captureDataDictionaryMenu(
-                          robot, processId, mainWindow.handle, outputDirectory.resolve("DataDictionary_menu.png"));
-                        robot.keyPress(KeyEvent.VK_ESCAPE);
-                        robot.keyRelease(KeyEvent.VK_ESCAPE);
-                        TimeUnit.MILLISECONDS.sleep(200);
-
-                        pressChord(robot, KeyEvent.VK_CONTROL, KeyEvent.VK_O);
-                        chooseFileInDialog(robot, processId, "Open", dictionaryFile, logFile);
-
-                        User32.INSTANCE.SetForegroundWindow(mainWindow.handle);
-                        pressTab(robot);
-                        pressTab(robot);
-                        pressTab(robot);
-                        pressTab(robot);
-                        pressTab(robot);
-                        pressTab(robot);
-                        pressTab(robot);
-                        pressKey(robot, KeyEvent.VK_RIGHT);
-                        pressKey(robot, KeyEvent.VK_F2);
-                        pasteFocusedValue(robot, databaseFile.toString());
-                        pressKey(robot, KeyEvent.VK_ENTER);
-                        pressTab(robot);
-                        captureWindowScreenshot(robot, mainWindow.handle, trainDatabaseScreenshot);
-
-                        selectNextTab(robot);
-                        captureWindowScreenshot(robot, mainWindow.handle, samplingScreenshot);
-
-                        selectNextTab(robot);
-                        captureWindowScreenshot(robot, mainWindow.handle, selectionScreenshot);
-
-                        selectTabByMnemonic(robot, KeyEvent.VK_P);
-                        TimeUnit.MILLISECONDS.sleep(300);
-                        setFocusedComboValue(robot, "Class");
-                        pressTab(robot);
-                        setFocusedComboValue(robot, "Iris-setosa");
-                        pressTab(robot);
-                        captureWindowScreenshot(robot, mainWindow.handle, parametersScreenshot);
-
-                        selectTabByMnemonic(robot, KeyEvent.VK_V);
-                        captureWindowScreenshot(robot, mainWindow.handle, advancedParametersScreenshot);
-
-                        selectTabByMnemonic(robot, KeyEvent.VK_O);
-                        captureWindowScreenshot(robot, mainWindow.handle, recodersScreenshot);
-
-                        selectTabByMnemonic(robot, KeyEvent.VK_G);
-                        captureWindowScreenshot(robot, mainWindow.handle, preprocessingScreenshot);
-
-                        selectTabByMnemonic(robot, KeyEvent.VK_S);
-                        captureWindowScreenshot(robot, mainWindow.handle, systemParametersScreenshot);
+                        runScenario(scenario, context);
                 } finally {
                         stopModl(modl);
+                        restoreClipboard(clipboard, savedClipboard);
                 }
         }
+
+        // ---------------------------------------------------------------------------------------------------------
+        // Scenario interpreter
+        // ---------------------------------------------------------------------------------------------------------
+
+        private static List<String> readScenario() throws IOException
+        {
+                String overridePath = System.getProperty("khiops.scenario");
+                if (overridePath != null) {
+                        return Files.readAllLines(Paths.get(overridePath), StandardCharsets.UTF_8);
+                }
+                try (InputStream stream = ModlMainWindowTest.class.getResourceAsStream(SCENARIO_RESOURCE)) {
+                        assertThat(stream).as("scenario resource %s", SCENARIO_RESOURCE).isNotNull();
+                        BufferedReader reader = new BufferedReader(new InputStreamReader(stream, StandardCharsets.UTF_8));
+                        return reader.lines().collect(Collectors.toList());
+                }
+        }
+
+        // One line = one command; blank lines and '#' comments are ignored
+        private static void runScenario(List<String> scenario, ScenarioContext context) throws InterruptedException
+        {
+                for (int index = 0; index < scenario.size(); index++) {
+                        String line = scenario.get(index).strip();
+                        if (line.isEmpty() || line.startsWith("#")) {
+                                continue;
+                        }
+                        String[] parts = line.split("\\s+", 2);
+                        try {
+                                String argument = parts.length > 1 ? context.expand(parts[1]) : "";
+                                executeCommand(context, parts[0], argument);
+                        } catch (InterruptedException e) {
+                                throw e;
+                        } catch (Exception | AssertionError e) {
+                                // Report the scenario line so the faulty step is immediately visible
+                                throw new AssertionError(
+                                  "Scenario line " + (index + 1) + " failed: '" + line + "' (" + e.getMessage() + ")",
+                                  e);
+                        }
+                }
+        }
+
+        private static void executeCommand(ScenarioContext context, String command, String argument) throws Exception
+        {
+                Robot robot = context.robot;
+                switch (command) {
+                // tab [count]: press TAB count times (default 1)
+                case "tab":
+                        int count = argument.isEmpty() ? 1 : Integer.parseInt(argument);
+                        for (int i = 0; i < count; i++) {
+                                pressTab(robot);
+                        }
+                        break;
+                // key <NAME>: press and release a single key (ENTER, ESCAPE, RIGHT, F2...)
+                case "key":
+                        pressKey(robot, resolveKey(argument));
+                        break;
+                // chord <MODIFIER>+<KEY>: for instance ALT+D or CTRL+O
+                case "chord":
+                        String[] keys = argument.split("\\+");
+                        if (keys.length != 2) {
+                                throw new IllegalArgumentException("a chord needs exactly two keys: " + argument);
+                        }
+                        pressChord(robot, resolveKey(keys[0]), resolveKey(keys[1]));
+                        break;
+                // mnemonic <LETTER>: select a tab through its Alt mnemonic
+                case "mnemonic":
+                        selectTabByMnemonic(robot, resolveKey(argument));
+                        break;
+                case "next-tab":
+                        selectNextTab(robot);
+                        break;
+                // paste <text>: replace the content of the focused field
+                case "paste":
+                        pasteFocusedValue(robot, argument);
+                        break;
+                // combo <text>: set the value of the focused combo box and validate it
+                case "combo":
+                        setFocusedComboValue(robot, argument);
+                        break;
+                case "wait":
+                        TimeUnit.MILLISECONDS.sleep(Long.parseLong(argument));
+                        break;
+                case "focus":
+                        User32.INSTANCE.SetForegroundWindow(context.mainWindow.handle);
+                        break;
+                // dialog <title> <file>: pick a file in a file chooser dialog
+                case "dialog":
+                        String[] dialogArguments = argument.split("\\s+", 2);
+                        if (dialogArguments.length != 2) {
+                                throw new IllegalArgumentException("expected '<title> <file>' but got: " + argument);
+                        }
+                        chooseFileInDialog(robot, context.processId, dialogArguments[0],
+                                           Paths.get(dialogArguments[1]), context.logFile);
+                        break;
+                // shot <file.png>: capture the main window
+                case "shot":
+                        captureWindowScreenshot(robot, context.mainWindow.handle,
+                                                context.outputDirectory.resolve(argument));
+                        break;
+                // mark: take a reference capture (call it before opening the menu)
+                case "mark": {
+                        robot.mouseMove(0, 0);
+                        robot.delay(500);
+                        Rectangle windowBounds = getWindowBounds(context.mainWindow.handle);
+                        assertThat(windowBounds).as("MODL visible frame bounds").isNotNull();
+                        // Extra height so that a popup extending below the window is also covered
+                        context.baselineRegion = new Rectangle(
+                          windowBounds.x, windowBounds.y, windowBounds.width, windowBounds.height + 400);
+                        context.baseline = robot.createScreenCapture(context.baselineRegion);
+                        break;
+                }
+                // shot-menu <file.png>: capture the menu bar together with the opened menu popup
+                case "shot-menu":
+                        // With a 'mark' reference, crop on the changed area (popup width, anything wider is cut)
+                        if (context.baseline != null) {
+                                captureChangedArea(robot, context, context.outputDirectory.resolve(argument));
+                                break;
+                        }
+                        captureDataDictionaryMenu(robot, context.processId, context.mainWindow.handle,
+                                                  context.outputDirectory.resolve(argument));
+                        break;
+                default:
+                        throw new IllegalArgumentException("unknown command '" + command + "'");
+                }
+        }
+
+        // Accepts CTRL, ALT, SHIFT, a single letter or digit, or any KeyEvent.VK_ suffix (ENTER, TAB, F2...)
+        private static int resolveKey(String name)
+        {
+                String upperName = name.strip().toUpperCase();
+                switch (upperName) {
+                case "CTRL":
+                        return KeyEvent.VK_CONTROL;
+                case "ALT":
+                        return KeyEvent.VK_ALT;
+                case "SHIFT":
+                        return KeyEvent.VK_SHIFT;
+                default:
+                        break;
+                }
+                if (upperName.length() == 1) {
+                        return KeyEvent.getExtendedKeyCodeForChar(upperName.charAt(0));
+                }
+                try {
+                        return KeyEvent.class.getField("VK_" + upperName).getInt(null);
+                } catch (ReflectiveOperationException e) {
+                        throw new IllegalArgumentException("unknown key '" + name + "'", e);
+                }
+        }
+
+        private static final class ScenarioContext
+        {
+                private final Robot robot;
+                private final long processId;
+                private final WindowInfo mainWindow;
+                private final Path outputDirectory;
+                private final Path logFile;
+                private final Map<String, String> variables = new HashMap<>();
+
+                // Reference screen capture taken by the 'mark' command, used to crop on what changed afterwards
+                private BufferedImage baseline;
+                private Rectangle baselineRegion;
+
+                private ScenarioContext(Robot robot, long processId, WindowInfo mainWindow, Path outputDirectory,
+                                        Path logFile)
+                {
+                        this.robot = robot;
+                        this.processId = processId;
+                        this.mainWindow = mainWindow;
+                        this.outputDirectory = outputDirectory;
+                        this.logFile = logFile;
+                }
+
+                // Replaces every ${name} placeholder, failing on unknown variables
+                private String expand(String text)
+                {
+                        Matcher matcher = VARIABLE_PATTERN.matcher(text);
+                        StringBuffer result = new StringBuffer();
+                        while (matcher.find()) {
+                                String value = variables.get(matcher.group(1));
+                                if (value == null) {
+                                        throw new IllegalArgumentException("unknown variable '" + matcher.group(1) +
+                                                                           "'");
+                                }
+                                matcher.appendReplacement(result, Matcher.quoteReplacement(value));
+                        }
+                        matcher.appendTail(result);
+                        return result.toString();
+                }
+        }
+
+        // ---------------------------------------------------------------------------------------------------------
+        // Clipboard handling
+        // ---------------------------------------------------------------------------------------------------------
+
+        private static Transferable readClipboard(Clipboard clipboard)
+        {
+                try {
+                        return clipboard.getContents(null);
+                } catch (IllegalStateException e) {
+                        // The clipboard may be locked by another application, nothing to restore in that case
+                        return null;
+                }
+        }
+
+        private static void restoreClipboard(Clipboard clipboard, Transferable savedContent)
+        {
+                if (savedContent == null) {
+                        return;
+                }
+                try {
+                        clipboard.setContents(savedContent, null);
+                } catch (IllegalStateException e) {
+                        // Best effort only
+                }
+        }
+
+        // ---------------------------------------------------------------------------------------------------------
+        // Screenshots
+        // ---------------------------------------------------------------------------------------------------------
 
         private static void captureWindowScreenshot(Robot robot, HWND window, Path screenshotFile) throws IOException
         {
@@ -178,6 +368,30 @@ class ModlMainWindowTest
                 }
                 BufferedImage screenshot = robot.createScreenCapture(screenshotBounds);
                 saveScreenshot(screenshot, screenshotFile);
+        }
+
+        // Crops the screenshot on the bounding box of the pixels that differ from the 'mark' reference capture
+        private static void captureChangedArea(Robot robot, ScenarioContext context, Path screenshotFile)
+          throws IOException
+        {
+                BufferedImage reference = context.baseline;
+                BufferedImage current = robot.createScreenCapture(context.baselineRegion);
+                int minX = Integer.MAX_VALUE;
+                int minY = Integer.MAX_VALUE;
+                int maxX = -1;
+                int maxY = -1;
+                for (int y = 0; y < current.getHeight(); y++) {
+                        for (int x = 0; x < current.getWidth(); x++) {
+                                if (current.getRGB(x, y) != reference.getRGB(x, y)) {
+                                        minX = Math.min(minX, x);
+                                        minY = Math.min(minY, y);
+                                        maxX = Math.max(maxX, x);
+                                        maxY = Math.max(maxY, y);
+                                }
+                        }
+                }
+                assertThat(maxX).as("changed pixels (the menu did not open?)").isGreaterThanOrEqualTo(0);
+                saveScreenshot(current.getSubimage(minX, minY, maxX - minX + 1, maxY - minY + 1), screenshotFile);
         }
 
         private static Rectangle findOwnedMenuBounds(long processId, HWND mainWindow)
@@ -220,6 +434,10 @@ class ModlMainWindowTest
                 assertThat(Files.isRegularFile(screenshotFile)).as("screenshot at %s", screenshotFile).isTrue();
                 assertThat(ImageIO.read(screenshotFile.toFile())).as("saved screenshot").isNotNull();
         }
+
+        // ---------------------------------------------------------------------------------------------------------
+        // Keyboard helpers
+        // ---------------------------------------------------------------------------------------------------------
 
         private static void pasteFocusedValue(Robot robot, String value)
         {
@@ -279,6 +497,10 @@ class ModlMainWindowTest
                 robot.keyRelease(key);
                 robot.keyRelease(modifierKey);
         }
+
+        // ---------------------------------------------------------------------------------------------------------
+        // Process and window helpers
+        // ---------------------------------------------------------------------------------------------------------
 
         private static String buildClasspath(Path jarDirectory) throws IOException
         {

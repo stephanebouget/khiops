@@ -1,0 +1,72 @@
+# MODL UI scenario: one command per line, the UI state is cumulative from top to bottom.
+#
+# Commands:
+#   tab [n]               press TAB n times (default 1)
+#   key <NAME>            press a single key (ENTER, ESCAPE, RIGHT, F2...)
+#   chord <MOD>+<KEY>     key combination (ALT+D, CTRL+O, CTRL+TAB...)
+#   mnemonic <LETTER>     select a tab with its Alt mnemonic
+#   next-tab              CTRL+TAB
+#   paste <text>          replace the content of the focused field
+#   combo <text>          set the focused combo box value and validate
+#   wait <ms>             sleep
+#   focus                 bring the main window to the foreground
+#   dialog <title> <file> pick a file in a file chooser dialog
+#   shot <file.png>       capture the main window
+#   mark                  take a reference capture before opening a menu (used by shot-menu)
+#   shot-menu <file.png>  capture the menu bar with the opened menu popup, cropped on what changed since 'mark'
+#
+# Variables: ${dictionaryFile}, ${databaseFile}
+
+# Mnemonic (underlined letter) of the "Data Dictionary" menu in the menu bar
+# Open the "Data Dictionary" menu with its mnemonic instead of a pixel click
+mark
+chord ALT+D
+wait 500
+shot-menu DataDictionary_menu.png
+key ESCAPE
+wait 200
+
+# Open the Iris dictionary
+chord CTRL+O
+dialog Open ${dictionaryFile}
+
+# Train database: set the database file
+focus
+tab 7
+key RIGHT
+key F2
+paste ${databaseFile}
+key ENTER
+shot Khiops_TrainDatabase.png
+
+# Leave the "Database files" table (Tab only cycles inside it)
+chord CTRL+TAB
+# Ctrl+PageDown switches to the next tab once the focus is outside the table
+chord CTRL+PAGE_DOWN
+wait 300
+shot Khiops_TrainDatabase_Sampling.png
+
+chord CTRL+PAGE_DOWN
+wait 300
+shot Khiops_TrainDatabase_Selection.png
+
+# Parameters: set the target variable and the main target value
+mnemonic P
+wait 300
+combo Class
+tab
+combo Iris-setosa
+tab
+shot Khiops_Parameters.png
+
+mnemonic V
+shot Khiops_Parameters_Advanced.png
+
+mnemonic O
+shot Khiops_Parameters_Recorders.png
+
+mnemonic G
+shot Khiops_Parameters_Preprocessing.png
+
+mnemonic S
+shot Khiops_Parameters_SystemParameters.png
